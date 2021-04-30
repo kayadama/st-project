@@ -1,0 +1,1601 @@
+---
+title: "st-project"
+knit: (function(input_file, encoding) {
+  out_dir <- 'docs';
+  rmarkdown::render(input_file,
+ encoding=encoding,
+ output_file=file.path(dirname(input_file), out_dir, 'index.html'))})
+author: "Brian Crist"
+date: "4/29/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+*This analysis is adapted from a project I did at Boston College in the fall semester of 2020 for the course "Software Tools for Data Analysis" as part of the M.S. in Applied Economics program.*
+
+# Introduction
+
+In this report I utilize data from two different sources, the American Community
+Survey (ACS) and the Iowa Department of Commerce (IDC) to analyze data regarding liquor
+sales, race, and income in Iowa. The data from both sources is provided across three
+geographic levels (city, county, zipcode). For a general overview I
+aggregate the overall racial diversity as an index and use this to understand general trends
+with regard to the racial makeup of an area. One finding is that areas classified as more diverse
+have a higher average amount spent per liter of liquor than less diverse locations.
+
+
+```{r, message=FALSE}
+
+# clean environment/console
+rm(list = ls())
+cat("\f")
+# load packages
+packages <- c("ggplot2"
+              , "ggrepel"
+              , "knitr"
+              , "RColorBrewer"
+              , "dplyr"
+              , "lemon"
+              , "scales"
+              )
+
+for (i in 1:length(packages)) {
+  if (!packages[i] %in% rownames(installed.packages())) {
+    install.packages(packages[i])
+  }
+  library(packages[i], character.only = TRUE) 
+}
+rm(packages)
+# set working directory to load data
+setwd("/home/brian/documents/classes/software.tools/final")
+# load data
+acs.cities <- read.csv("project.acs.cities.csv")
+acs.counties <- read.csv("project.acs.counties.csv")
+acs.zipcodes <- read.csv("project.acs.zipcodes.csv")
+sales.cities <- read.csv("project.sales.cities.csv")
+sales.counties <- read.csv("project.sales.counties.csv")
+sales.zipcodes <- read.csv("project.sales.zipcodes.csv")
+
+# delete unneeded columns
+acs.cities[, c("high.school", "bachelor", "unemployment")] <- NULL
+acs.counties[, c("high.school", "bachelor", "unemployment")] <- NULL
+acs.zipcodes[, c("high.school", "bachelor", "unemployment")] <- NULL
+
+```
+
+# Data Summary
+## IDC Data {.tabset .tabset-fade .tabset-pills}
+The IDC data is divided across three separate files, one at each geographic level. Each
+file lists the total sales in dollars and volume for each of ten liquor categories for every
+location. The data has been aggregated and summarized in the tables below.
+
+### Overview
+
+```{r}
+# IDC descriptive statistics
+
+city.dol.sum <- sum(sales.cities$sale.dollars)
+city.vol.sum <- sum(sales.cities$sale.volume)
+city.count.sum <- length(unique(sales.cities$city))
+  
+county.dol.sum <- sum(sales.counties$sale.dollars)
+county.vol.sum <- sum(sales.counties$sale.volume)
+county.count.sum <- length(unique(sales.counties$county))
+
+zip.dol.sum <- sum(sales.zipcodes$sale.dollars)
+zip.vol.sum <- sum(sales.zipcodes$sale.volume)
+zip.count.sum <- length(unique(sales.zipcodes$zipcode))
+
+sales.all <- as.data.frame(cbind(c(city.dol.sum
+                                   , city.vol.sum
+                                   , city.count.sum)
+                                 , c(county.dol.sum
+                                     , county.vol.sum
+                                     , county.count.sum)
+                                 , c(zip.dol.sum
+                                     , zip.vol.sum
+                                     , zip.count.sum)
+                                 )
+                           ) 
+
+colnames(sales.all) <- c("City", "County", "Zipcode")
+rownames(sales.all) <- c("Sum of sales, dollars"
+                         , "Sum of sales, liters"
+                         , "Unique locations")
+
+kable(sales.all
+      , format.args = list(big.mark = ",")
+      , caption = "Iowa Liquor Sales")
+```
+
+### Cities
+
+```{r}
+
+# Liquor Cities
+# sales in dollars
+sales.cities.stats.dol <- as.data.frame(matrix(ncol = 7
+                                           , nrow = 10))
+colnames(sales.cities.stats.dol) <- c("variable", "n", "min"
+                                      , "mean", "median", "max"
+                                      , "isNA")
+labs <- sales.cities$category[1:10]
+sales.cities.stats.dol$variable <- labs
+for (i in 1:length(labs)){
+  sales.cities.stats.dol$n[i] <- nrow(sales.cities) - sum(as.numeric(is.na(sales.cities[sales.cities$category == sales.cities$category[i], "sale.dollars"])))
+  sales.cities.stats.dol$min[i] <- min(na.omit(sales.cities[sales.cities$category == sales.cities$category[i], "sale.dollars"]))
+  sales.cities.stats.dol$mean[i] <- round(mean(na.omit(sales.cities[sales.cities$category == sales.cities$category[i],"sale.dollars"])))
+  sales.cities.stats.dol$median[i] <- round(median(na.omit(sales.cities[sales.cities$category == sales.cities$category[i],"sale.dollars"])))
+  sales.cities.stats.dol$max[i] <- max(na.omit(sales.cities[sales.cities$category == sales.cities$category[i],"sale.dollars"]))
+  sales.cities.stats.dol$isNA[i] <- sum(as.numeric(is.na(sales.cities[sales.cities$category == sales.cities$category[i],"sale.dollars"])))
+}
+kable(sales.cities.stats.dol
+      , format.args = list(big.mark = ",")
+      , caption = "Iowa Cities Liquor Sales/$")
+
+# sales in volume
+sales.cities.stats.vol <- as.data.frame(matrix(ncol = 7
+                                           , nrow = 10))
+colnames(sales.cities.stats.vol) <- c("variable", "n", "min", "mean", "median", "max", "isNA")
+labs <- sales.cities$category[1:10]
+sales.cities.stats.vol$variable <- labs
+for (i in 1:length(labs)){
+  sales.cities.stats.vol$n[i] <- nrow(sales.cities) - sum(as.numeric(is.na(sales.cities[sales.cities$category == sales.cities$category[i], "sale.volume"])))
+  sales.cities.stats.vol$min[i] <- min(na.omit(sales.cities[sales.cities$category == sales.cities$category[i], "sale.volume"]))
+  sales.cities.stats.vol$mean[i] <- round(mean(na.omit(sales.cities[sales.cities$category == sales.cities$category[i],"sale.volume"])))
+  sales.cities.stats.vol$median[i] <- round(median(na.omit(sales.cities[sales.cities$category == sales.cities$category[i],"sale.volume"])))
+  sales.cities.stats.vol$max[i] <- max(na.omit(sales.cities[sales.cities$category == sales.cities$category[i],"sale.volume"]))
+  sales.cities.stats.vol$isNA[i] <- sum(as.numeric(is.na(sales.cities[sales.cities$category == sales.cities$category[i],"sale.volume"])))
+}
+kable(sales.cities.stats.vol
+      , format.args = list(big.mark = ",")
+      , caption = "Iowa Cities Liquor Sales/volume (L)")
+
+```
+
+
+### Counties
+
+```{r}
+
+# Liquor Counties
+# sales in dollars
+sales.counties.stats.dol <- as.data.frame(matrix(ncol = 7
+                                             , nrow = 10))
+colnames(sales.counties.stats.dol) <- c("variable", "n", "min", "mean", "median", "max", "isNA")
+labs <- sales.counties$category[1:10]
+sales.counties.stats.dol$variable <- labs
+for (i in 1:length(labs)){
+  sales.counties.stats.dol$n[i] <- nrow(sales.counties) - sum(as.numeric(is.na(sales.counties[sales.counties$category == sales.counties$category[i], "sale.dollars"])))
+  sales.counties.stats.dol$min[i] <- min(na.omit(sales.counties[sales.counties$category == sales.counties$category[i], "sale.dollars"]))
+  sales.counties.stats.dol$mean[i] <- round(mean(na.omit(sales.counties[sales.counties$category == sales.counties$category[i],"sale.dollars"])))
+  sales.counties.stats.dol$median[i] <- round(median(na.omit(sales.counties[sales.counties$category == sales.counties$category[i],"sale.dollars"])))
+  sales.counties.stats.dol$max[i] <- max(na.omit(sales.counties[sales.counties$category == sales.counties$category[i],"sale.dollars"]))
+  sales.counties.stats.dol$isNA[i] <- sum(as.numeric(is.na(sales.counties[sales.counties$category == sales.counties$category[i],"sale.dollars"])))
+}
+kable(sales.counties.stats.dol
+      , format.args = list(big.mark = ",")
+      , caption = "Iowa Counties Liquor Sales/$")
+
+# sales in volume
+sales.counties.stats.vol <- as.data.frame(matrix(ncol = 7
+                                             , nrow = 10))
+colnames(sales.counties.stats.vol) <- c("variable", "n", "min", "mean", "median", "max", "isNA")
+labs <- sales.counties$category[1:10]
+sales.counties.stats.vol$variable <- labs
+for (i in 1:length(labs)){
+  sales.counties.stats.vol$n[i] <- nrow(sales.counties) - sum(as.numeric(is.na(sales.counties[sales.counties$category == sales.counties$category[i], "sale.volume"])))
+  sales.counties.stats.vol$min[i] <- min(na.omit(sales.counties[sales.counties$category == sales.counties$category[i], "sale.volume"]))
+  sales.counties.stats.vol$mean[i] <- round(mean(na.omit(sales.counties[sales.counties$category == sales.counties$category[i],"sale.volume"])))
+  sales.counties.stats.vol$median[i] <- round(median(na.omit(sales.counties[sales.counties$category == sales.counties$category[i],"sale.volume"])))
+  sales.counties.stats.vol$max[i] <- max(na.omit(sales.counties[sales.counties$category == sales.counties$category[i],"sale.volume"]))
+  sales.counties.stats.vol$isNA[i] <- sum(as.numeric(is.na(sales.counties[sales.counties$category == sales.counties$category[i],"sale.volume"])))
+}
+kable(sales.counties.stats.vol
+      , format.args = list(big.mark = ",")
+      , caption = "Iowa Counties Liquor Sales/volume (L)")
+
+```
+
+### Zipcodes
+
+```{r}
+
+# Liquor Zipcodes
+# sales in dollars
+sales.zipcodes.stats.dol <- as.data.frame(matrix(ncol = 7
+                                             , nrow = 10))
+colnames(sales.zipcodes.stats.dol) <- c("variable", "n", "min", "mean", "median", "max", "isNA")
+labs <- sales.zipcodes$category[1:10]
+sales.zipcodes.stats.dol$variable <- labs
+for (i in 1:length(labs)){
+  sales.zipcodes.stats.dol$n[i] <- nrow(sales.zipcodes) - sum(as.numeric(is.na(sales.zipcodes[sales.zipcodes$category == sales.zipcodes$category[i], "sale.dollars"])))
+  sales.zipcodes.stats.dol$min[i] <- min(na.omit(sales.zipcodes[sales.zipcodes$category == sales.zipcodes$category[i], "sale.dollars"]))
+  sales.zipcodes.stats.dol$mean[i] <- round(mean(na.omit(sales.zipcodes[sales.zipcodes$category == sales.zipcodes$category[i],"sale.dollars"])))
+  sales.zipcodes.stats.dol$median[i] <- round(median(na.omit(sales.zipcodes[sales.zipcodes$category == sales.zipcodes$category[i],"sale.dollars"])))
+  sales.zipcodes.stats.dol$max[i] <- max(na.omit(sales.zipcodes[sales.zipcodes$category == sales.zipcodes$category[i],"sale.dollars"]))
+  sales.zipcodes.stats.dol$isNA[i] <- sum(as.numeric(is.na(sales.zipcodes[sales.zipcodes$category == sales.zipcodes$category[i],"sale.dollars"])))
+}
+kable(sales.zipcodes.stats.dol
+      , format.args = list(big.mark = ",")
+      , caption = "Iowa Liquor Sales/$ by Zipcode")
+
+# sales in volume
+sales.zipcodes.stats.vol <- as.data.frame(matrix(ncol = 7
+                                             , nrow = 10))
+colnames(sales.zipcodes.stats.vol) <- c("variable", "n", "min", "mean", "median", "max", "isNA")
+labs <- sales.zipcodes$category[1:10]
+sales.zipcodes.stats.vol$variable <- labs
+for (i in 1:length(labs)){
+  sales.zipcodes.stats.vol$n[i] <- nrow(sales.zipcodes) - sum(as.numeric(is.na(sales.zipcodes[sales.zipcodes$category == sales.zipcodes$category[i], "sale.volume"])))
+  sales.zipcodes.stats.vol$min[i] <- min(na.omit(sales.zipcodes[sales.zipcodes$category == sales.zipcodes$category[i], "sale.volume"]))
+  sales.zipcodes.stats.vol$mean[i] <- round(mean(na.omit(sales.zipcodes[sales.zipcodes$category == sales.zipcodes$category[i],"sale.volume"])))
+  sales.zipcodes.stats.vol$median[i] <- round(median(na.omit(sales.zipcodes[sales.zipcodes$category == sales.zipcodes$category[i],"sale.volume"])))
+  sales.zipcodes.stats.vol$max[i] <- max(na.omit(sales.zipcodes[sales.zipcodes$category == sales.zipcodes$category[i],"sale.volume"]))
+  sales.zipcodes.stats.vol$isNA[i] <- sum(as.numeric(is.na(sales.zipcodes[sales.zipcodes$category == sales.zipcodes$category[i],"sale.volume"])))
+}
+kable(sales.zipcodes.stats.vol
+      , format.args = list(big.mark = ",")
+      , caption = "Iowa Liquor Sales/volume (L) by Zipcode")
+
+```
+
+
+## ACS Data {.tabset .tabset-fade .tabset-pills}
+The ACS data sets contain 13 variables along with a variable for the appropriate
+regional level. The tables below summarize the data at each level. Three levels regarding
+education level and employment status are not of concern for this project and have been removed.
+
+### Cities
+```{r}
+# ACS Cities
+acs.cities.stats <- as.data.frame(matrix(ncol = 7
+                                         , nrow = 9))
+colnames(acs.cities.stats) <- c("variable", "n", "min", "mean", "median", "max", "isNA")
+acs.cities.stats$variable <- colnames(acs.cities)[2:10]
+for (i in 2:10){
+  acs.cities.stats$n[i-1] <- nrow(acs.cities) - sum(as.numeric(is.na(acs.cities[,i])))
+  acs.cities.stats$min[i-1] <- min(na.omit(acs.cities[,i]))
+  acs.cities.stats$mean[i-1] <- round(mean(na.omit(acs.cities[,i])))
+  acs.cities.stats$median[i-1] <- round(median(na.omit(acs.cities[,i])))
+  acs.cities.stats$max[i-1] <- max(na.omit(acs.cities[,i]))
+  acs.cities.stats$isNA[i-1] <- sum(as.numeric(is.na(acs.cities[,i])))
+}
+kable(acs.cities.stats
+      , format.args = list(big.mark = ",")
+      , caption = "ACS Iowa Cities")
+
+```
+
+### Counties
+
+```{r}
+# ACS Counties
+acs.counties.stats <- as.data.frame(matrix(ncol = 7
+                                           , nrow = 9))
+colnames(acs.counties.stats) <- c("variable", "n", "min", "mean", "median", "max", "isNA")
+acs.counties.stats$variable <- colnames(acs.counties)[2:10]
+for (i in 2:10){
+  acs.counties.stats$n[i-1] <- nrow(acs.counties) - sum(as.numeric(is.na(acs.counties[,i])))
+  acs.counties.stats$min[i-1] <- min(na.omit(acs.counties[,i]))
+  acs.counties.stats$mean[i-1] <- round(mean(na.omit(acs.counties[,i])))
+  acs.counties.stats$median[i-1] <- round(median(na.omit(acs.counties[,i])))
+  acs.counties.stats$max[i-1] <- max(na.omit(acs.counties[,i]))
+  acs.counties.stats$isNA[i-1] <- sum(as.numeric(is.na(acs.counties[,i])))
+}
+kable(acs.counties.stats
+      , format.args = list(big.mark = ",")
+      , caption = "ACS Iowa Counties")
+
+```
+
+### Zipcodes
+
+```{r}
+# ACS Zipcodes
+acs.zipcodes.stats <- as.data.frame(matrix(ncol = 7
+                                           , nrow = 9))
+colnames(acs.zipcodes.stats) <- c("variable", "n", "min", "mean", "median", "max", "isNA")
+acs.zipcodes.stats$variable <- colnames(acs.zipcodes)[2:10]
+for (i in 2:10){
+  acs.zipcodes.stats$n[i-1] <- nrow(acs.zipcodes) - sum(as.numeric(is.na(acs.zipcodes[,i])))
+  acs.zipcodes.stats$min[i-1] <- min(na.omit(acs.zipcodes[,i]))
+  acs.zipcodes.stats$mean[i-1] <- round(mean(na.omit(acs.zipcodes[,i])))
+  acs.zipcodes.stats$median[i-1] <- round(median(na.omit(acs.zipcodes[,i])))
+  acs.zipcodes.stats$max[i-1] <- max(na.omit(acs.zipcodes[,i]))
+  acs.zipcodes.stats$isNA[i-1] <- sum(as.numeric(is.na(acs.zipcodes[,i])))
+}
+kable(acs.zipcodes.stats
+      , format.args = list(big.mark = ",")
+      , caption = "ACS Iowa Zipcodes")
+```
+
+
+# Diversity Index
+
+The racial makeup of the population in Iowa is predominantly white, but there are
+also six other racial groups categorized as minority populations. In order to measure the
+relative amount of diversity within the state, a diversity index has been used. This index
+measures the probability that two individuals randomly selected from a location will belong
+to the same racial group. It is adapted from a measurement used in ecology known as the
+Simpson index. In an ecological context, it measures the degree of concentration among types
+of individuals. This same measure is also referred to as the Herfindahl index in economics,
+and is used as a measure of the size of firms in relation to the industry.
+
+In this analysis, the index is created by taking the sums of the square of the proportion
+of the population represented by each racial subgroup within a given location. This value has
+been subtracted from 1 to allow for a more intuitive interpretation, with 0 representing no
+diversity, and 1 representing maximum diversity. Because Iowa is not very diverse overall,
+most of the values present are less than 0.5.
+
+$$ Diversity \: Index = 1 - \sum_{i=1}^n \Big(\frac{pop.racial\:subgroup\:i}{total\:population\:i}\Big)^2 $$
+
+# ACS Scatter Plots {.tabset .tabset-fade .tabset-pills}
+
+The charts below show the income of different cities as a function of population, colored
+according to the weighted diversity index described above. Because of the large number of small towns in Iowa, without
+any transformation the plot is heavily skewed to the right. A log transformation has been added
+to the x-axis in order to increase the visibility of the observations for locations with smaller
+populations. Median population is shown with a dashed vertical line. Average income is represented on the y-axis, and the size and color of the points is used to present the relative level of diversity. There is a vertical dashed line at the median population for each level.
+
+Iowa as a whole is not that diverse, but that was already known. What this graph
+shows is that the smallest towns tend to be the least diverse and biggest cities are the most
+diverse. In general, the average income for the most diverse locations are distributed fairly
+evenly, with possibly a slightly lower average income than the mean for the state. Although overall, the locations
+with higher diversity do not have a drastically different average income from those with lower levels of diversity,
+what is notable is that the top 6 cities with the highest average income are all very low on the
+diversity index.
+
+## Cities Code
+
+```{r warning=FALSE}
+
+#  city level index
+labs <- acs.cities$city
+acs.cities$diversity <- NA
+for (i in 1:length(labs)){    # subtract from 1 so low diversity = 0 & high diversity = 1
+  acs.cities$diversity[i] <- 1 - sum((sum(acs.cities$pop.white[i])/acs.cities$population[i])^2
+                                     , (sum(acs.cities$pop.black[i]/acs.cities$population[i]))^2
+                                     , (sum(acs.cities$pop.indian[i]/acs.cities$population[i]))^2
+                                     , (sum(acs.cities$pop.asian[i]/acs.cities$population[i]))^2
+                                     , (sum(acs.cities$pop.hawai[i]/acs.cities$population[i]))^2
+                                     , (sum(acs.cities$pop.other[i]/acs.cities$population[i]))^2
+                                     , (sum(acs.cities$pop.multi[i]/acs.cities$population[i]))^2
+  )
+}
+
+# subset outliers for labels
+rep_lab <- c("Bentley", "Sun Valley Lake", "Johnston"
+             , "Clayton", "Fayette", "Yetter"
+             , "Des Moines", "Ames")
+acs.cities$rep_lab <- NA
+for (i in 1:nrow(acs.cities)){
+  if(acs.cities$city[i] %in% rep_lab){
+    acs.cities$rep_lab[i] <- acs.cities$city[i]
+  }
+}
+
+# city level diversity index - log transformation
+div1 <- ggplot(acs.cities, aes(x = log(population)
+                               , y = income
+                               , size = diversity
+                               , fill = diversity
+                               )
+) + 
+  geom_point(color = "black"
+             , shape = 21
+             , stroke = 0.5
+             , alpha = 0.75
+  ) +
+  scale_size_continuous(range = c(1, 10)
+                        ) +
+  geom_vline(aes(xintercept = median(log(population))
+                 )
+             , color = "azure4"
+             , linetype = "dashed"
+             , size = 0.5
+             ) +
+  annotate(geom = "text"
+           , x = median(log(acs.cities$population)) + 1
+           , y = 72000
+           , color = "azure4"
+           , size = 3
+           , label = "Median Population"
+           ) +
+  scale_color_gradient2(mid = "blue"
+                        , high = "red"
+                        , space = "Lab"
+                        , guide = "colourbar"
+                        , aesthetics = "fill"
+                        , name = "Diversity") +
+  labs(title = "Iowa Cities Diversity"
+       , subtitle = "by population and income"
+       , x = "Population (log scale)"
+       , y = "Income, $ (in thousands)"
+  ) +
+  geom_text_repel(aes(label = rep_lab)
+                  , color = "black"
+                  , size = 3
+                  , na.rm = TRUE
+                  , label.padding = 0.5
+                  , segment.color = "light grey"
+                  ) +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5
+                                  , face = "bold"
+                                  , size = 20
+                                  , color = "#912600"
+  )
+  , plot.subtitle = element_text(hjust = 0.5
+                                 , face = "bold"
+                                 , size = 14
+                                 , color = "#912600"
+  )
+  , axis.title.x = element_text(face = "bold"
+                                , color = "#912600"
+                                , size = 14
+  )
+  , axis.text.x  = element_text(face = "bold"
+                                , vjust = 0.5
+                                , size = 12
+  )
+  , axis.title.y = element_text(face = "bold"
+                                , color = "#912600"
+                                , size = 14
+  )
+  , axis.text.y = element_text(face = "bold"
+                               , vjust = 0.5
+                               , size = 12
+  )
+  , legend.position = "bottom"
+  ) +
+  scale_y_continuous(breaks = seq(from = 5000        
+                                  , to = 100000
+                                  , by = 10000
+  )
+  , labels = seq(from = 5      
+                 , to = 100
+                 , by = 10
+  )
+  )
+
+```
+
+## Cities Plot
+
+```{r warning=FALSE}
+div1
+```
+
+
+## Counties Code
+
+```{r}
+
+# county level diversity index
+labs <- acs.counties$county
+acs.counties$diversity <- NA
+for (i in 1:length(labs)){    # subtract from 1 so low diversity = 0 & high diversity = 1
+  acs.counties$diversity[i] <- 1 - sum((sum(acs.counties$pop.white[i])/acs.counties$population[i])^2
+                                       , (sum(acs.counties$pop.black[i]/acs.counties$population[i]))^2
+                                       , (sum(acs.counties$pop.indian[i]/acs.counties$population[i]))^2
+                                       , (sum(acs.counties$pop.asian[i]/acs.counties$population[i]))^2
+                                       , (sum(acs.counties$pop.hawai[i]/acs.counties$population[i]))^2
+                                       , (sum(acs.counties$pop.other[i]/acs.counties$population[i]))^2
+                                       , (sum(acs.counties$pop.multi[i]/acs.counties$population[i]))^2
+                                       
+  )
+}
+
+# county level diversity plot
+rep_lab <- c("Story", "Decatur", "Dallas"
+              , "Warren", "Grundy", "Adams"
+              , "Polk", "Linn")
+acs.counties$rep_lab <- NA
+for (i in 1:nrow(acs.counties)){
+  if(acs.counties$county[i] %in% rep_lab){
+    acs.counties$rep_lab[i] <- acs.counties$county[i]
+  }
+}
+
+diversity <- acs.counties$diversity
+div2 <- ggplot(acs.counties, aes(x = log(population)
+                                 , y = income
+                                 , fill = diversity
+                                 , size = diversity)
+) + 
+  geom_point(color = "black"
+             , shape = 21
+             , stroke = 0.5
+             , alpha = 0.75
+  ) +
+  scale_size_continuous(range = c(1, 10)
+  ) +
+  geom_vline(aes(xintercept = median(log(population))
+  )
+  , color = "azure4"
+  , linetype = "dashed"
+  , size = 0.5
+  ) +
+  annotate(geom = "text"
+           , x = median(log(acs.counties$population)) - 0.5
+           , y = 42500
+           , color = "azure4"
+           , size = 3
+           , label = "Median Population"
+  ) +
+  scale_color_gradient2(mid = "blue"
+                        , high = "red",
+                        space = "Lab",
+                        guide = "colourbar",
+                        aesthetics = "fill"
+                        , name = "Diversity") +
+  labs(title = "Iowa Counties Diversity"
+       , subtitle = "by population and income"
+       , x = "Population (log scale)"
+       , y = "Income, $ (in thousands)"
+  ) +
+  geom_text_repel(aes(label = rep_lab)
+                  , color = "black"
+                  , size = 3
+                  , na.rm = TRUE
+                  , point.padding = 0.5
+                  , segment.color = "light grey"
+  ) +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5
+                                  , face = "bold"
+                                  , size = 20
+                                  , color = "#912600"
+  )
+  , plot.subtitle = element_text(hjust = 0.5
+                                 , face = "bold"
+                                 , size = 14
+                                 , color = "#912600"
+  )
+  , axis.title.x = element_text(face = "bold"
+                                , color = "#912600"
+                                , size = 14
+  )
+  , axis.text.x  = element_text(face = "bold"
+                                , vjust = 0.5
+                                , size = 12
+  )
+  , axis.title.y = element_text(face = "bold"
+                                , color = "#912600"
+                                , size = 14
+  )
+  , axis.text.y = element_text(face = "bold"
+                               , vjust = 0.5
+                               , size = 12
+  )
+  , legend.position = "bottom"
+  ) +
+  scale_y_continuous(breaks = seq(from = 20000        
+                                  , to = 45000
+                                  , by = 5000
+  )
+  , labels = seq(from = 20      
+                 , to = 45
+                 , by = 5
+  )
+  )
+```
+
+
+## Counties Plot
+
+```{r warning=FALSE}
+div2
+```
+
+## Zipcodes Code
+
+```{r warning=FALSE}
+
+
+# zipcode level diversity index
+labs <- acs.zipcodes$zipcode
+acs.zipcodes$diversity <- NA
+for (i in 1:length(labs)){    # subtract from 1 so low diversity = 0 & high diversity = 1
+  acs.zipcodes$diversity[i] <- 1 - sum((sum(acs.zipcodes$pop.white[i])/acs.zipcodes$population[i])^2
+                                       , (sum(acs.zipcodes$pop.black[i]/acs.zipcodes$population[i]))^2
+                                       , (sum(acs.zipcodes$pop.indian[i]/acs.zipcodes$population[i]))^2
+                                       , (sum(acs.zipcodes$pop.asian[i]/acs.zipcodes$population[i]))^2
+                                       , (sum(acs.zipcodes$pop.hawai[i]/acs.zipcodes$population[i]))^2
+                                       , (sum(acs.zipcodes$pop.other[i]/acs.zipcodes$population[i]))^2
+                                       , (sum(acs.zipcodes$pop.multi[i]/acs.zipcodes$population[i]))^2
+                                       
+  )
+}
+
+# zipcode level diversity plot
+rep_lab <- c("50323", "50061", "50252", "51111"
+             , "50319", "50127", "50011", "50012"
+             , "52242", "52142", "50652", "50014"
+             , "50426", "52588")
+acs.zipcodes$rep_lab <- NA
+for (i in 1:nrow(acs.zipcodes)){
+  if(acs.zipcodes$zipcode[i] %in% rep_lab){
+    acs.zipcodes$rep_lab[i] <- acs.zipcodes$zipcode[i]
+  }
+}
+diversity <- acs.zipcodes$diversity
+div3 <- ggplot(acs.zipcodes, aes(x = log(population)
+                                 , y = income
+                                 , fill = diversity
+                                 , size = diversity)
+) + 
+  geom_point(color = "black"
+             , shape = 21
+             , stroke = 0.5
+             , alpha = 0.85
+  ) +
+  scale_size_continuous(range = c(1, 10)
+  ) +
+  geom_vline(aes(xintercept = median(log(population))
+  )
+  , color = "azure4"
+  , linetype = "dashed"
+  , size = 0.5
+  ) +
+  annotate(geom = "text"
+           , x = median(log(acs.zipcodes$population)) - 0.8
+           , y = 7500
+           , color = "azure4"
+           , size = 3
+           , label = "Median Population"
+  ) +
+  scale_color_gradient2(mid = "blue"
+                        , high = "red",
+                        space = "Lab",
+                        guide = "colourbar",
+                        aesthetics = "fill"
+                        , name = "Diversity") +
+  labs(title = "Iowa Zipcodes Diversity"
+       , subtitle = "by population and income"
+       , x = "Population (log scale)"
+       , y = "Income, $ (in thousands)"
+  ) +
+  geom_text_repel(aes(label = rep_lab)
+                  , color = "black"
+                  , size = 3
+                  , na.rm = TRUE
+                  , point.padding = 0.5
+                  , segment.color = "light grey"
+  ) +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5
+                                  , face = "bold"
+                                  , size = 20
+                                  , color = "#912600"
+  )
+  , plot.subtitle = element_text(hjust = 0.5
+                                 , face = "bold"
+                                 , size = 14
+                                 , color = "#912600"
+  )
+  , axis.title.x = element_text(face = "bold"
+                                , color = "#912600"
+                                , size = 14
+  )
+  , axis.text.x  = element_text(face = "bold"
+                                , vjust = 0.5
+                                , size = 12
+  )
+  , axis.title.y = element_text(face = "bold"
+                                , color = "#912600"
+                                , size = 14
+  )
+  , axis.text.y = element_text(face = "bold"
+                               , vjust = 0.5
+                               , size = 12
+  )
+  , legend.position = "bottom"
+  ) +
+  scale_y_continuous(breaks = seq(from = 0        
+                                  , to = 80000
+                                  , by = 10000
+  )
+  , labels = seq(from = 0      
+                 , to = 80
+                 , by = 10
+  )
+  )
+```
+
+## Zipcodes Plot
+
+```{r warning=FALSE}
+div3
+```
+
+# ICD Bar Chart {.tabset .tabset-fade .tabset-pills}
+
+The chart below highlights the percentage of each kind of liquor category sold across
+each geographic level, measured in both dollars and liters. The charts are very similar. This is
+not unexpected, but it is important to check. If there were drastic variations in sales patterns
+across geographies, this would be significant.
+
+## Sales Code
+
+```{r}
+
+# add geo tag
+sales.cities.stats.dol$geo <- c("city")
+sales.counties.stats.dol$geo <- c("county")
+sales.zipcodes.stats.dol$geo <- c("zipcode")
+
+# add sum of sales as column
+# city
+labs <- sales.cities.stats.dol$variable
+sales.cities.stats.dol$sum <- NA
+for (i in 1:length(labs)) {
+  sales.cities.stats.dol$sum[i] <- sum(sales.cities[sales.cities$category == labs[i],"sale.dollars"])
+}
+
+# county
+sales.counties.stats.dol$sum <- NA
+for (i in 1:length(labs)) {
+  sales.counties.stats.dol$sum[i] <- sum(sales.counties[sales.counties$category == labs[i],"sale.dollars"])
+}  
+
+# zipcode
+sales.zipcodes.stats.dol$sum <- NA
+for (i in 1:length(labs)) {
+  sales.zipcodes.stats.dol$sum[i] <- sum(sales.zipcodes[sales.zipcodes$category == labs[i],"sale.dollars"])
+}
+
+# bind stats dfs
+agg.sales.stats.dol <- rbind(sales.cities.stats.dol
+                             , sales.counties.stats.dol
+                             , sales.zipcodes.stats.dol)
+# plot
+liq.dollar.comp <- ggplot(agg.sales.stats.dol, aes(x = geo
+                                 , y = sum
+                                 , fill = variable
+                        )
+                        ) + 
+                          geom_bar(stat = "identity"
+                                   , position = "fill"
+                          ) +
+  labs(title = "Liquor Sales by Dollar"
+       , subtitle = "aggregated by geo level"
+       , x = "Geographic level"
+       , y = "% sales/$"
+  ) +theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5
+                                  , face = "bold"
+                                  , size = 20
+                                  , color = "#912600"
+  )
+  , plot.subtitle = element_text(hjust = 0.5
+                                 , face = "bold"
+                                 , size = 14
+                                 , color = "#912600"
+  )
+  , axis.title.x = element_text(face = "bold"
+                                , color = "#912600"
+                                , size = 14
+  )
+  , axis.text.x  = element_text(face = "bold"
+                                , vjust = 0.5
+                                , size = 12
+  )
+  , axis.title.y = element_text(face = "bold"
+                                , color = "#912600"
+                                , size = 14
+  )
+  , axis.text.y = element_text(face = "bold"
+                               , vjust = 0.5
+                               , size = 12
+  )
+  , legend.position = "left"
+  )
+
+```
+
+## Sales Chart
+
+```{r}
+liq.dollar.comp
+```
+
+## Volume Code
+
+```{r}
+
+# add geo tag
+sales.cities.stats.vol$geo <- c("city")
+sales.counties.stats.vol$geo <- c("county")
+sales.zipcodes.stats.vol$geo <- c("zipcode")
+
+# add sum of sales as column
+# city
+labs <- sales.cities.stats.vol$variable
+sales.cities.stats.vol$sum <- NA
+for (i in 1:length(labs)) {
+  sales.cities.stats.vol$sum[i] <- sum(sales.cities[sales.cities$category == labs[i],"sale.dollars"])
+}
+
+# county
+sales.counties.stats.vol$sum <- NA
+for (i in 1:length(labs)) {
+  sales.counties.stats.vol$sum[i] <- sum(sales.counties[sales.counties$category == labs[i],"sale.dollars"])
+}  
+
+# zipcode
+sales.zipcodes.stats.vol$sum <- NA
+for (i in 1:length(labs)) {
+  sales.zipcodes.stats.vol$sum[i] <- sum(sales.zipcodes[sales.zipcodes$category == labs[i],"sale.dollars"])
+}
+# bind stat dfs
+agg.sales.stats.vol <- rbind(sales.cities.stats.vol
+                             , sales.counties.stats.vol
+                             , sales.zipcodes.stats.vol)
+# plot
+liq.volume.comp <- ggplot(agg.sales.stats.vol, aes(x = geo
+                                                   , y = sum
+                                                   , fill = variable
+                          )
+                          ) + 
+                            geom_bar(stat = "identity"
+                                     , position = "fill"
+                                     ) +
+  labs(title = "Liquor Sales by Liter"
+       , subtitle = "aggregated by geo level"
+       , x = "Geographic level"
+       , y = "% sale/liters"
+  ) +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5
+                                  , face = "bold"
+                                  , size = 20
+                                  , color = "#912600"
+  )
+  , plot.subtitle = element_text(hjust = 0.5
+                                 , face = "bold"
+                                 , size = 14
+                                 , color = "#912600"
+  )
+  , axis.title.x = element_text(face = "bold"
+                                , color = "#912600"
+                                , size = 14
+  )
+  , axis.text.x  = element_text(face = "bold"
+                                , vjust = 0.5
+                                , size = 12
+  )
+  , axis.title.y = element_text(face = "bold"
+                                , color = "#912600"
+                                , size = 14
+  )
+  , axis.text.y = element_text(face = "bold"
+                               , vjust = 0.5
+                               , size = 12
+  )
+  , legend.position = "left"
+  )
+
+```
+
+## Volume Chart
+
+```{r}
+liq.volume.comp
+
+```
+
+# Diversity & Avg.$/L {.tabset .tabset-fade .tabset-pills}
+
+These graphs are used to investigate the question of whether there is a connection between the level of diversity in an area and the average amount paid per liter of liquor sold. Level of diversity is on the x-axis, and the average amount spent per liter of liquor is on the y-axis, with the population represented by the size and color of the points.
+
+Each at each geographic level there is a positive correlation between the amount of diversity in a location and the average amount spent per liter of liquor. A simple linear regression with 95% confidence bands have been added.
+
+We already know that more concentrated population centers tend to have more
+diverse populations. But it may be the case that these areas with more diverse populations
+have larger average incomes as well, as a result of being located in urban centers. The next
+question will explore this possibility.
+
+## Cities Code
+
+```{r}
+# cities
+
+# liquor categories are listed separately, need to combine them
+# to get avg. price per liter
+cities <- unique(sales.cities$city)
+agg.city.sales <- as.data.frame(as.matrix(cities
+                                , nrow = length(cities)
+                                , ncol = 1))
+colnames(agg.city.sales) <- c("city")
+agg.city.sales$sale.dollars <- NA
+agg.city.sales$sale.volume <- NA
+
+# sum of sale.dollars
+for (i in 1:length(cities)){
+  agg.city.sales$sale.dollars[i] <- sum(sales.cities[sales.cities$city == cities[i], "sale.dollars"])
+}
+# sum of sale.volume
+for (i in 1:length(cities)){
+  agg.city.sales$sale.volume[i] <- sum(sales.cities[sales.cities$city == cities[i], "sale.volume"])
+}
+# avg. price per liter
+agg.city.sales$ppl <- agg.city.sales$sale.dollars/agg.city.sales$sale.volume
+
+# make names alike
+acs.cities$city <- tolower(gsub(" |'|-|_", ".", acs.cities$city))
+agg.city.sales$city <- tolower(gsub(" |'|-|_", ".", agg.city.sales$city))
+
+# merge with population
+acs.sales.cities <- merge(agg.city.sales
+                          , acs.cities
+                          , by = c("city")
+                          , all.x = FALSE, all.y = FALSE
+                          )
+
+# # the city of 'templeton', row 338 is an outlier for ppl, remove
+acs.sales.cities <- acs.sales.cities[-c(338),]
+
+# plot
+ppl.city <- ggplot(acs.sales.cities, aes(x = diversity
+                                 , y = ppl
+                                 , fill = population
+                                 , size = population)
+) + 
+  geom_point(color = "black"
+             , shape = 23
+             , stroke = 0.5
+             , alpha = 0.85
+  ) +
+  scale_size_continuous(range = c(0.5, 15)
+  ) +
+  geom_vline(aes(xintercept = median(diversity)
+  )
+  , color = "azure4"
+  , linetype = "dashed"
+  , size = 0.5
+  ) +
+  annotate(geom = "text"
+           , x = median(acs.sales.cities$diversity) + 0.03
+           , y = 24
+           , color = "azure4"
+           , size = 3
+           , label = "Median\nDiversity"
+  ) +
+  scale_color_gradient2(mid = "orchid"
+                        , high = "yellow",
+                        space = "Lab",
+                        guide = "colourbar",
+                        aesthetics = "fill"
+                        , name = "Population") +
+  labs(title = "Iowa Cities"
+       , subtitle = "Avg. $/L by diversity"
+       , x = "Diversity"
+       , y = "Liquor Sales Avg. $/l"
+  ) +
+  geom_smooth(method = "lm"
+              , size = 0.25
+              , color = "black"
+              , alpha = 0.12
+              ) +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5
+                                  , face = "bold"
+                                  , size = 20
+                                  , color = "#912600"
+  )
+  , plot.subtitle = element_text(hjust = 0.5
+                                 , face = "bold"
+                                 , size = 14
+                                 , color = "#912600"
+  )
+  , axis.title.x = element_text(face = "bold"
+                                , color = "#912600"
+                                , size = 14
+  )
+  , axis.text.x  = element_text(face = "bold"
+                                , vjust = 0.5
+                                , size = 12
+  )
+  , axis.title.y = element_text(face = "bold"
+                                , color = "#912600"
+                                , size = 14
+  )
+  , axis.text.y = element_text(face = "bold"
+                               , vjust = 0.5
+                               , size = 12
+  )
+  , legend.position = "left"
+  ) +
+  scale_y_continuous(breaks = seq(from = 0
+                                  , to = 55
+                                  , by = 5
+  )
+  , labels = seq(from = 0
+                 , to = 55
+                 , by = 5
+  )
+  )
+```
+
+## Cities Plot
+
+```{r message=FALSE}
+ppl.city
+```
+
+## Counties Code
+
+```{r}
+# counties
+
+# liquor categories are listed separately, need to combine them
+# to get avg. price per liter
+counties <- unique(sales.counties$county)
+agg.county.sales <- as.data.frame(as.matrix(counties
+                                          , nrow = length(counties)
+                                          , ncol = 1))
+colnames(agg.county.sales) <- c("county")
+agg.county.sales$sale.dollars <- NA
+agg.county.sales$sale.volume <- NA
+
+# sum of sale.dollars
+for (i in 1:length(counties)){
+  agg.county.sales$sale.dollars[i] <- sum(sales.counties[sales.counties$county == counties[i], "sale.dollars"])
+}
+# sum of sale.volume
+for (i in 1:length(counties)){
+  agg.county.sales$sale.volume[i] <- sum(sales.counties[sales.counties$county == counties[i], "sale.volume"])
+}
+# avg. price per liter
+agg.county.sales$ppl <- agg.county.sales$sale.dollars/agg.county.sales$sale.volume
+
+# make names alike
+acs.counties$county <- tolower(gsub(" |'|-|_", ".", acs.counties$county))
+agg.county.sales$county <- tolower(gsub(" |'|-|_", ".", agg.county.sales$county))
+
+# merge with population
+acs.sales.counties <- merge(agg.county.sales
+                          , acs.counties
+                          , by = c("county")
+                          , all.x = FALSE, all.y = FALSE
+)
+
+# plot
+ppl.county <- ggplot(acs.sales.counties, aes(x = diversity
+                                         , y = ppl
+                                         , fill = population
+                                         , size = population)
+) + 
+  geom_point(color = "black"
+             , shape = 23
+             , stroke = 0.5
+             , alpha = 0.85
+  ) +
+  scale_size_continuous(range = c(0.5, 15)
+  ) +
+  geom_vline(aes(xintercept = median(diversity)
+  )
+  , color = "azure4"
+  , linetype = "dashed"
+  , size = 0.5
+  ) +
+  annotate(geom = "text"
+           , x = median(acs.sales.counties$diversity) + 0.025
+           , y = 16
+           , color = "azure4"
+           , size = 3
+           , label = "Median\nDiversity"
+  ) +
+  scale_color_gradient2(mid = "orchid"
+                        , high = "yellow",
+                        space = "Lab",
+                        guide = "colourbar",
+                        aesthetics = "fill"
+                        , name = "Population") +
+  labs(title = "Iowa Counties"
+       , subtitle = "Avg. $/L by diversity"
+       , x = "Diversity"
+       , y = "Liquor Sales Avg. $/l"
+  ) +
+  geom_smooth(method = "lm"
+              , size = 0.25
+              , color = "black"
+              , alpha = 0.12) +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5
+                                  , face = "bold"
+                                  , size = 20
+                                  , color = "#912600"
+  )
+  , plot.subtitle = element_text(hjust = 0.5
+                                 , face = "bold"
+                                 , size = 14
+                                 , color = "#912600"
+  )
+  , axis.title.x = element_text(face = "bold"
+                                , color = "#912600"
+                                , size = 14
+  )
+  , axis.text.x  = element_text(face = "bold"
+                                , vjust = 0.5
+                                , size = 12
+  )
+  , axis.title.y = element_text(face = "bold"
+                                , color = "#912600"
+                                , size = 14
+  )
+  , axis.text.y = element_text(face = "bold"
+                               , vjust = 0.5
+                               , size = 12
+  )
+  , legend.position = "left"
+  ) +
+  scale_y_continuous(breaks = seq(from = 10
+                                  , to = 20
+                                  , by = 2
+  )
+  , labels = seq(from = 10
+                 , to = 20
+                 , by = 2
+  )
+  )
+
+```
+
+## Counties Plot
+
+```{r message=FALSE}
+ppl.county
+```
+
+## Zipcodes Code
+
+```{r}
+# zipcodes
+
+# liquor categories are listed separately, need to combine them
+# to get avg. price per liter
+zipcodes <- unique(sales.zipcodes$zipcode)
+agg.zipcode.sales <- as.data.frame(as.matrix(zipcodes
+                                            , nrow = length(zipcodes)
+                                            , ncol = 1))
+colnames(agg.zipcode.sales) <- c("zipcode")
+agg.zipcode.sales$sale.dollars <- NA
+agg.zipcode.sales$sale.volume <- NA
+
+# sum of sale.dollars
+for (i in 1:length(zipcodes)){
+  agg.zipcode.sales$sale.dollars[i] <- sum(sales.zipcodes[sales.zipcodes$zipcode == zipcodes[i], "sale.dollars"])
+}
+# sum of sale.volume
+for (i in 1:length(zipcodes)){
+  agg.zipcode.sales$sale.volume[i] <- sum(sales.zipcodes[sales.zipcodes$zipcode == zipcodes[i], "sale.volume"])
+}
+# avg. price per liter
+agg.zipcode.sales$ppl <- agg.zipcode.sales$sale.dollars/agg.zipcode.sales$sale.volume
+
+# merge with population
+acs.sales.zipcodes <- merge(agg.zipcode.sales
+                            , acs.zipcodes
+                            , by = c("zipcode")
+                            , all.x = FALSE, all.y = FALSE
+)
+
+# # the zipcode 51463, row 264 is an outlier for ppl, remove
+acs.sales.zipcodes <- acs.sales.zipcodes[-c(264),]
+
+# plot
+ppl.zipcode <- ggplot(acs.sales.zipcodes, aes(x = diversity
+                                             , y = ppl
+                                             , fill = population
+                                             , size = population)
+) + 
+  geom_point(color = "black"
+             , shape = 23
+             , stroke = 0.5
+             , alpha = 0.85
+  ) +
+  scale_size_continuous(range = c(0.5, 10)
+  ) +
+  geom_vline(aes(xintercept = median(diversity)
+  )
+  , color = "azure4"
+  , linetype = "dashed"
+  , size = 0.5
+  ) +
+  annotate(geom = "text"
+           , x = median(acs.sales.counties$diversity) - 0.06
+           , y = 24
+           , color = "azure4"
+           , size = 3
+           , label = "Median\nDiversity"
+  ) +
+  scale_color_gradient2(mid = "orchid"
+                        , high = "yellow",
+                        space = "Lab",
+                        guide = "colourbar",
+                        aesthetics = "fill"
+                        , name = "Population") +
+  labs(title = "Iowa Zipcodes"
+       , subtitle = "Avg. $/L by diversity"
+       , x = "Diversity"
+       , y = "Liquor Sales Avg. $/l"
+  ) +
+  geom_smooth(method = "lm"
+              , size = 0.25
+              , color = "black"
+              , alpha = 0.12
+              ) +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5
+                                  , face = "bold"
+                                  , size = 20
+                                  , color = "#912600"
+  )
+  , plot.subtitle = element_text(hjust = 0.5
+                                 , face = "bold"
+                                 , size = 14
+                                 , color = "#912600"
+  )
+  , axis.title.x = element_text(face = "bold"
+                                , color = "#912600"
+                                , size = 14
+  )
+  , axis.text.x  = element_text(face = "bold"
+                                , vjust = 0.5
+                                , size = 12
+  )
+  , axis.title.y = element_text(face = "bold"
+                                , color = "#912600"
+                                , size = 14
+  )
+  , axis.text.y = element_text(face = "bold"
+                               , vjust = 0.5
+                               , size = 12
+  )
+  , legend.position = "left"
+  ) +
+  scale_y_continuous(breaks = seq(from = 0
+                                  , to = 55
+                                  , by = 5
+  )
+  , labels = seq(from = 0
+                 , to = 55
+                 , by = 5
+  )
+  )
+
+```
+
+## Zipcodes Plot
+
+```{r message=FALSE}
+ppl.zipcode
+```
+
+
+# Diversity, Avg.$/L & Income {.tabset .tabset-fade .tabset-pills}
+
+
+These next charts present average liquor sales, defined as the total sales in dollars
+divided by the total sale in liters, as a function of median income. Diversity is represented by the size and color of the points. 
+
+There is one extreme outlier that has been removed at the city and zipcode level. In the charts below the average amount spent per
+liter of liquor varies from approximately $9 to $24. The point removed had a value of $54.
+This is clearly an anomaly, and has been removed to help with clarity. At the county level,
+which is the largest available partition of the population, counties that are relatively diverse
+have the greatest span of median incomes. In these more diverse counties, the average
+amount spent per liter of liquor is also higher.
+
+On the city and zipcode level it can be seen that the more diverse locations are
+generally in the lower spectrum of median income. This shows that even though there is a
+tendency for locations with higher diversity to have a higher amount spent per liter of liquor,
+generally speaking the most diverse locations are also in the lower half of income spectrum.
+
+## Cities Code
+
+```{r}
+# the city of 'templeton', row 338 is an outlier for ppl, remove
+acs.sales.cities <- acs.sales.cities[-c(338),]
+
+
+# plot - no outlier
+inc.city <- ggplot(acs.sales.cities, aes(x = income
+                                                      , y = ppl
+                                                      , fill = diversity
+                                                      , size = diversity)
+) + 
+  geom_point(color = "black"
+             , shape = 21
+             , stroke = 0.5
+             , alpha = 0.85
+  ) +
+  scale_size_continuous(range = c(0.5, 10)
+  ) +
+  geom_vline(aes(xintercept = median(income)
+                )
+            , color = "azure4"
+            , linetype = "dashed"
+            , size = 0.5
+            ) +
+  geom_hline(aes(yintercept = median(ppl)
+                 )
+            , color = "azure4"
+            , linetype = "dashed"
+            , size = 0.5
+             ) +
+  scale_color_gradient2(mid = "blue"
+                        , high = "red",
+                        space = "Lab",
+                        guide = "colourbar",
+                        aesthetics = "fill"
+                        , name = "Diversity") +
+  labs(title = "Iowa Cities"
+       , subtitle = "Avg. $/L by income"
+       , x = "Income (thousands)"
+       , y = "Liquor Sales Avg. $/l"
+  ) +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5
+                                  , face = "bold"
+                                  , size = 20
+                                  , color = "#912600"
+  )
+  , plot.subtitle = element_text(hjust = 0.5
+                                 , face = "bold"
+                                 , size = 14
+                                 , color = "#912600"
+  )
+  , axis.title.x = element_text(face = "bold"
+                                , color = "#912600"
+                                , size = 14
+  )
+  , axis.text.x  = element_text(face = "bold"
+                                , vjust = 0.5
+                                , size = 12
+  )
+  , axis.title.y = element_text(face = "bold"
+                                , color = "#912600"
+                                , size = 14
+  )
+  , axis.text.y = element_text(face = "bold"
+                               , vjust = 0.5
+                               , size = 12
+  )
+  , legend.position = "bottom"
+  ) +
+  scale_y_continuous(breaks = seq(from = 0
+                                  , to = 25
+                                  , by = 5
+  )
+  , labels = seq(from = 0
+                 , to = 25
+                 , by = 5
+  )) +
+  scale_x_continuous(breaks = seq(from = 0
+                                  , to = 65000
+                                  , by = 10000)
+                     
+  , labels = seq(from = 0
+                 , to = 65
+                 , by  = 10)
+  )
+
+```
+
+## Cities Plot
+
+```{r}
+inc.city
+```
+
+## Counties Code
+
+```{r}
+# county
+
+# plot
+inc.county <- ggplot(acs.sales.counties, aes(x = income
+                                             , y = ppl
+                                             , fill = diversity
+                                             , size = diversity)
+) + 
+  geom_point(color = "black"
+             , shape = 21
+             , stroke = 0.5
+             , alpha = 0.85
+  ) +
+  scale_size_continuous(range = c(0.5, 10)
+  ) +
+  geom_vline(aes(xintercept = median(income)
+                )
+            , color = "azure4"
+            , linetype = "dashed"
+            , size = 0.5
+            ) +
+  geom_hline(aes(yintercept = median(ppl)
+                 )
+            , color = "azure4"
+            , linetype = "dashed"
+            , size = 0.5
+             ) +
+  scale_color_gradient2(mid = "blue"
+                        , high = "red",
+                        space = "Lab",
+                        guide = "colourbar",
+                        aesthetics = "fill"
+                        , name = "Diversity") +
+  labs(title = "Iowa Counties"
+       , subtitle = "Avg. $/L by income"
+       , x = "Income (thousands)"
+       , y = "Liquor Sales Avg. $/l"
+  ) +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5
+                                  , face = "bold"
+                                  , size = 20
+                                  , color = "#912600"
+  )
+  , plot.subtitle = element_text(hjust = 0.5
+                                 , face = "bold"
+                                 , size = 14
+                                 , color = "#912600"
+  )
+  , axis.title.x = element_text(face = "bold"
+                                , color = "#912600"
+                                , size = 14
+  )
+  , axis.text.x  = element_text(face = "bold"
+                                , vjust = 0.5
+                                , size = 12
+  )
+  , axis.title.y = element_text(face = "bold"
+                                , color = "#912600"
+                                , size = 14
+  )
+  , axis.text.y = element_text(face = "bold"
+                               , vjust = 0.5
+                               , size = 12
+  )
+  , legend.position = "bottom"
+  ) +
+  scale_y_continuous(breaks = seq(from = 10
+                                  , to = 20
+                                  , by = 2
+  )
+  , labels = seq(from = 10
+                 , to = 20
+                 , by = 2
+  )) +
+    scale_x_continuous(breaks = seq(from = 15000
+                                    , to = 45000
+                                    , by = 5000)
+                       , labels = seq(from = 15
+                                      , to = 45
+                                      , by = 5)
+                       )
+
+```
+
+
+## Counties Plot
+
+```{r}
+inc.county
+```
+
+
+## Zipcodes Code
+
+```{r}
+# zipcode
+
+# remove outlier
+# the city of 'templeton', row 264 is an outlier for ppl, remove
+acs.sales.zipcodes <- acs.sales.zipcodes[-c(264),]
+
+# plot
+inc.zipcode <- ggplot(acs.sales.zipcodes, aes(x = income
+                                              , y = ppl
+                                              , fill = diversity
+                                              , size = diversity)
+) + 
+  geom_point(color = "black"
+             , shape = 21
+             , stroke = 0.5
+             , alpha = 0.85
+  ) +
+  scale_size_continuous(range = c(0.5, 10)
+  ) +
+  geom_vline(aes(xintercept = median(income)
+                )
+            , color = "azure4"
+            , linetype = "dashed"
+            , size = 0.5
+            ) +
+  geom_hline(aes(yintercept = median(ppl)
+                 )
+            , color = "azure4"
+            , linetype = "dashed"
+            , size = 0.5
+             ) +
+  scale_color_gradient2(mid = "blue"
+                        , high = "red",
+                        space = "Lab",
+                        guide = "colourbar",
+                        aesthetics = "fill"
+                        , name = "Diversity") +
+  labs(title = "Iowa Zipcodes"
+       , subtitle = "Avg. $/l by income"
+       , x = "Income (thousands)"
+       , y = "Liquor Sales Avg. $/l"
+  ) +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5
+                                  , face = "bold"
+                                  , size = 20
+                                  , color = "#912600"
+  )
+  , plot.subtitle = element_text(hjust = 0.5
+                                 , face = "bold"
+                                 , size = 14
+                                 , color = "#912600"
+  )
+  , axis.title.x = element_text(face = "bold"
+                                , color = "#912600"
+                                , size = 14
+  )
+  , axis.text.x  = element_text(face = "bold"
+                                , vjust = 0.5
+                                , size = 12
+  )
+  , axis.title.y = element_text(face = "bold"
+                                , color = "#912600"
+                                , size = 14
+  )
+  , axis.text.y = element_text(face = "bold"
+                               , vjust = 0.5
+                               , size = 12
+  )
+  , legend.position = "bottom"
+  ) +
+  scale_y_continuous(breaks = seq(from = 0
+                                  , to = 55
+                                  , by = 5
+  )
+  , labels = seq(from = 0
+                 , to = 55
+                 , by = 5
+  )) +
+    scale_x_continuous(breaks = seq(from = 0
+                                    , to = 75000
+                                    , by = 10000)
+                       , labels = seq(from = 0
+                                      , to = 75
+                                      , by = 10)
+    ) 
+
+```
+
+## Zipcodes Plot
+
+```{r}
+inc.zipcode
+```
+
+
+
+
+
+
+
+
+
+
+
+
