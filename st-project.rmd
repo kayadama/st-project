@@ -15,8 +15,6 @@ date: "4/29/2021"
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-*This analysis is adapted from a project I did at Boston College in the fall semester of 2020 for the course "Software Tools for Data Analysis" as part of the M.S. in Applied Economics program.*
-
 # Introduction
 
 In this report I utilize data from two different sources, the American Community
